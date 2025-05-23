@@ -1,3 +1,6 @@
+import { Coordinates, CalculationMethod, Prayer, PrayerTimes } from 'adhan';
+import { format } from 'date-fns';
+
 interface Task {
   id: string;
   title: string;
@@ -5,16 +8,29 @@ interface Task {
   completed: boolean;
 }
 
-interface PrayerTime {
-  name: string;
-  time: Date;
+interface StoredPrayerTimes {
+  date: string;
+  times: Record<string, string>;
 }
 
 export const prayerTimes = {
   checkAndNotify: async () => {
-    const prayers = await getPrayerTimes();
-    const now = new Date();
+    const coordinates = await getStoredCoordinates();
+    if (!coordinates) return;
+
+    const params = CalculationMethod.MuslimWorldLeague();
+    const date = new Date();
+    const prayerTimes = new PrayerTimes(coordinates, date, params);
     
+    const prayers = [
+      { name: 'Fajr', time: prayerTimes.fajr },
+      { name: 'Dhuhr', time: prayerTimes.dhuhr },
+      { name: 'Asr', time: prayerTimes.asr },
+      { name: 'Maghrib', time: prayerTimes.maghrib },
+      { name: 'Isha', time: prayerTimes.isha }
+    ];
+
+    const now = new Date();
     prayers.forEach(prayer => {
       if (isTimeToNotify(prayer.time, now)) {
         chrome.notifications.create(`prayer-${prayer.name}`, {
@@ -26,16 +42,30 @@ export const prayerTimes = {
         });
       }
     });
+
+    // Store prayer times for today
+    const storedTimes: StoredPrayerTimes = {
+      date: format(date, 'yyyy-MM-dd'),
+      times: {
+        fajr: format(prayerTimes.fajr, 'HH:mm'),
+        dhuhr: format(prayerTimes.dhuhr, 'HH:mm'),
+        asr: format(prayerTimes.asr, 'HH:mm'),
+        maghrib: format(prayerTimes.maghrib, 'HH:mm'),
+        isha: format(prayerTimes.isha, 'HH:mm')
+      }
+    };
+    
+    await chrome.storage.local.set({ prayerTimes: storedTimes });
   }
 };
 
 export const taskReminders = {
   checkAndNotify: async () => {
-    const tasks = await getTasks();
+    const { tasks = [] } = await chrome.storage.local.get('tasks');
     const now = new Date();
     
-    tasks.forEach(task => {
-      if (!task.completed && isTimeToNotify(task.dueDate, now)) {
+    tasks.forEach((task: Task) => {
+      if (!task.completed && isTimeToNotify(new Date(task.dueDate), now)) {
         chrome.notifications.create(`task-${task.id}`, {
           type: 'basic',
           iconUrl: 'icon-128.png',
@@ -93,12 +123,8 @@ function isTimeToNotify(targetTime: Date, currentTime: Date): boolean {
   return Math.abs(targetTime.getTime() - currentTime.getTime()) < 60000; // Within 1 minute
 }
 
-async function getPrayerTimes(): Promise<PrayerTime[]> {
-  // TODO: Implement prayer time calculation based on location
-  return [];
-}
-
-async function getTasks(): Promise<Task[]> {
-  // TODO: Get tasks from storage
-  return [];
+async function getStoredCoordinates(): Promise<Coordinates | null> {
+  const { coordinates } = await chrome.storage.local.get('coordinates');
+  if (!coordinates) return null;
+  return new Coordinates(coordinates.latitude, coordinates.longitude);
 }
